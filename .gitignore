@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Anotações pessoais: ficam só na máquina local
+*.md
+!/README.md
