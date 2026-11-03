@@ -10,7 +10,9 @@ public class PaymentTests
     {
         var value = Money.Of(0);
 
-        Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, "Test", Guid.NewGuid()));
+        var exception = Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, "Test", Guid.NewGuid()));
+
+        Assert.Equal("value", exception.ParamName);
     }
 
     [Fact]
@@ -18,15 +20,36 @@ public class PaymentTests
     {
         var value = Money.Of(100);
 
-        Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, "Test", Guid.Empty));
+        var exception = Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, "Test", Guid.Empty));
+
+        Assert.Equal("transactionId", exception.ParamName);
     }
 
-    [Fact]
-    public void CreatePayment_ShouldThrowArgumentException_WhenDescriptionIsNullOrEmpty()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CreatePayment_ShouldThrowArgumentException_WhenDescriptionIsNullOrWhiteSpace(string? description)
     {
         var value = Money.Of(100);
 
-        Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, null, Guid.NewGuid()));
+        var exception = Assert.Throws<ArgumentException>(() => Payment.Create(value, PaymentMethod.CreditCard, description!, Guid.NewGuid()));
+
+        Assert.Equal("description", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(PaymentMethod.Pix)]
+    [InlineData(PaymentMethod.DebitCard)]
+    [InlineData(PaymentMethod.Boleto)]
+    [InlineData((PaymentMethod)999)]
+    public void CreatePayment_ShouldThrowArgumentException_WhenPaymentMethodIsNotCreditCard(PaymentMethod paymentMethod)
+    {
+        var value = Money.Of(100);
+
+        var exception = Assert.Throws<ArgumentException>(() => Payment.Create(value, paymentMethod, "Test", Guid.NewGuid()));
+
+        Assert.Equal("paymentMethod", exception.ParamName);
     }
 
     [Fact]
@@ -46,6 +69,8 @@ public class PaymentTests
             Assert.Equal(description, payment.Description);
             Assert.Equal(transactionId, payment.TransactionId);
             Assert.Equal(PaymentStatus.Created, payment.Status);
+            Assert.Equal(Money.Zero, payment.CapturedValue);
+            Assert.Equal(Money.Zero, payment.RefundedValue);
         });
     }
 
@@ -58,12 +83,28 @@ public class PaymentTests
     }
 
     [Fact]
-    public void AuthorizePayment_ShouldThrowInvalidOperationException_WhenAlreadyAuthorized()
+    public void AuthorizePayment_ShouldSetStatusToAuthorized_WhenStatusIsCreated()
     {
-        var payment = Payment.Create(Money.Of(100), PaymentMethod.CreditCard, "Test", Guid.NewGuid());
+        var payment = PaymentInStatus(PaymentStatus.Created);
+
         var authorizedPayment = payment.Authorize();
 
-        Assert.Throws<InvalidOperationException>(() => authorizedPayment.Authorize());
+        Assert.Equal(PaymentStatus.Authorized, authorizedPayment.Status);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Authorized)]
+    [InlineData(PaymentStatus.Captured)]
+    [InlineData(PaymentStatus.Completed)]
+    [InlineData(PaymentStatus.Refunded)]
+    [InlineData(PaymentStatus.Canceled)]
+    public void AuthorizePayment_ShouldThrowInvalidOperationException_WhenStatusIsNotCreated(PaymentStatus status)
+    {
+        var payment = PaymentInStatus(status);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => payment.Authorize());
+
+        Assert.Contains("status", exception.Message);
     }
 
     [Theory]
@@ -94,28 +135,24 @@ public class PaymentTests
         Assert.Throws<InvalidOperationException>(() => authorizedPayment.Capture(capturedValue));
     }
 
-    [Fact]
-    public void CapturePayment_ShouldThrowInvalidOperationException_WhenAlreadyCaptured()
+    [Theory]
+    [InlineData(PaymentStatus.Created)]
+    [InlineData(PaymentStatus.Captured)]
+    [InlineData(PaymentStatus.Completed)]
+    [InlineData(PaymentStatus.Refunded)]
+    [InlineData(PaymentStatus.Canceled)]
+    public void CapturePayment_ShouldThrowInvalidOperationException_WhenStatusIsNotAuthorized(PaymentStatus status)
     {
-        var payment = Payment.Create(Money.Of(200), PaymentMethod.CreditCard, "Test", Guid.NewGuid());
-        var authorizedPayment = payment.Authorize();
-        var capturedPayment = authorizedPayment.Capture(Money.Of(150));
-        var secondCapturedValue = Money.Of(50);
+        var payment = PaymentInStatus(status);
+        var capturedValue = Money.Of(50);
 
-        Assert.Throws<InvalidOperationException>(() => capturedPayment.Capture(secondCapturedValue));
+        var exception = Assert.Throws<InvalidOperationException>(() => payment.Capture(capturedValue));
+
+        Assert.Contains("status", exception.Message);
     }
 
     [Fact]
-    public void CapturePayment_ShouldThrowInvalidOperationException_WhenCapturedStatusIsDifferentOfExpected()
-    {
-        var payment = Payment.Create(Money.Of(200), PaymentMethod.CreditCard, "Test", Guid.NewGuid());
-        var capturedValue = Money.Of(200);
-
-        Assert.Throws<InvalidOperationException>(() => payment.Capture(capturedValue));
-    }
-
-    [Fact]
-    public void CapturePayment_ShouldArgumentException_WhenCapturedValueIsZero()
+    public void CapturePayment_ShouldThrowArgumentException_WhenCapturedValueIsZero()
     {
         var payment = Payment.Create(Money.Of(200), PaymentMethod.CreditCard, "Test", Guid.NewGuid());
         var authorizedPayment = payment.Authorize();
@@ -210,4 +247,100 @@ public class PaymentTests
         Assert.Equal(PaymentStatus.Refunded, refundedPayment.Status);
     }
 
+    [Fact]
+    public void RefundPayment_ShouldKeepStatus_WhenPaymentStatusIsCompleteAndRefundIsPartial()
+    {
+        var payment = PaymentInStatus(PaymentStatus.Completed);
+        var refundedValue = Money.Of(50);
+
+        var refundedPayment = payment.Refund(refundedValue);
+
+        Assert.Equal(PaymentStatus.Completed, refundedPayment.Status);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Created)]
+    [InlineData(PaymentStatus.Authorized)]
+    [InlineData(PaymentStatus.Refunded)]
+    [InlineData(PaymentStatus.Canceled)]
+    public void RefundPayment_ShouldThrowInvalidOperationException_WhenStatusIsNotCapturedOrCompleted(PaymentStatus status)
+    {
+        var payment = PaymentInStatus(status);
+        var refundedValue = Money.Of(10);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => payment.Refund(refundedValue));
+
+        Assert.Contains("status", exception.Message);
+    }
+
+    [Fact]
+    public void CompletePayment_ShouldSetStatusToCompleted_WhenStatusIsCaptured()
+    {
+        var payment = PaymentInStatus(PaymentStatus.Captured);
+
+        var completedPayment = payment.Complete();
+
+        Assert.Equal(PaymentStatus.Completed, completedPayment.Status);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Created)]
+    [InlineData(PaymentStatus.Authorized)]
+    [InlineData(PaymentStatus.Completed)]
+    [InlineData(PaymentStatus.Refunded)]
+    [InlineData(PaymentStatus.Canceled)]
+    public void CompletePayment_ShouldThrowInvalidOperationException_WhenStatusIsNotCaptured(PaymentStatus status)
+    {
+        var payment = PaymentInStatus(status);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => payment.Complete());
+
+        Assert.Contains("status", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Created)]
+    [InlineData(PaymentStatus.Authorized)]
+    public void CancelPayment_ShouldSetStatusToCanceled_WhenStatusIsCreatedOrAuthorized(PaymentStatus status)
+    {
+        var payment = PaymentInStatus(status);
+
+        var canceledPayment = payment.Cancel();
+
+        Assert.Equal(PaymentStatus.Canceled, canceledPayment.Status);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Captured)]
+    [InlineData(PaymentStatus.Completed)]
+    [InlineData(PaymentStatus.Refunded)]
+    [InlineData(PaymentStatus.Canceled)]
+    public void CancelPayment_ShouldThrowInvalidOperationException_WhenStatusIsNotCreatedOrAuthorized(PaymentStatus status)
+    {
+        var payment = PaymentInStatus(status);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => payment.Cancel());
+
+        Assert.Contains("status", exception.Message);
+    }
+
+    private static Payment PaymentInStatus(PaymentStatus status)
+    {
+        var created = Payment.Create(Money.Of(200), PaymentMethod.CreditCard, "Test", Guid.NewGuid());
+
+        var payment = status switch
+        {
+            PaymentStatus.Created => created,
+            PaymentStatus.Authorized => created.Authorize(),
+            PaymentStatus.Captured => created.Authorize().Capture(Money.Of(200)),
+            PaymentStatus.Completed => created.Authorize().Capture(Money.Of(200)).Complete(),
+            PaymentStatus.Refunded => created.Authorize().Capture(Money.Of(200)).Refund(Money.Of(200)),
+            PaymentStatus.Canceled => created.Cancel(),
+            _ => throw new ArgumentOutOfRangeException(nameof(status))
+        };
+
+        Assert.Equal(status, payment.Status);
+
+        return payment;
+    }
 }

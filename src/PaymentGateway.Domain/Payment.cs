@@ -32,8 +32,8 @@ namespace PaymentGateway.Domain
             if (value.Amount <= 0)
                 throw new ArgumentException("O valor do pagamento deve ser maior que zero.", nameof(value));
 
-            if (!Enum.IsDefined(paymentMethod))
-                throw new ArgumentException("Método de pagamento inválido.", nameof(paymentMethod));
+            if (paymentMethod != PaymentMethod.CreditCard)
+                throw new ArgumentException("O método de pagamento deve ser cartão de crédito.", nameof(paymentMethod));
 
             if (transactionId == Guid.Empty)
                 throw new ArgumentException("O ID da transação não pode ser vazio.", nameof(transactionId));

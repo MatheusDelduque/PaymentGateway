@@ -8,6 +8,7 @@ Mini gateway de pagamentos em C#/.NET 10, criado como projeto de estudo de arqui
 
 - **`Money`:** value object para valores em reais. Rejeita valores negativos e mais de 2 casas decimais.
 - **`Payment`:** agregado imutável, em que cada transição devolve um novo objeto. Controla autorização, captura, estorno, conclusão e cancelamento.
+- **Regra de criação:** nesta primeira versão, o gateway aceita somente cartão de crédito.
 - **Regras de valor:**
   - O valor do pagamento não muda depois da criação.
   - A autorização é sempre do valor integral.
@@ -52,7 +53,7 @@ dotnet test
 
 ## Próximos passos
 
-- [ ] Concluir as regras de criação e os testes de transição de estado
+- [x] Concluir as regras de criação e os testes de transição de estado
 - [ ] Autorizar e capturar por meio de uma porta para o adquirente
 - [ ] Tratar recusa, resposta desconhecida e expiração da autorização
 - [ ] Adicionar idempotência e resiliência
